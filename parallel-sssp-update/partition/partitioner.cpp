@@ -2,16 +2,18 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <vector>
 
 void Partitioner::partitionGraph(const std::string& inputFile, const std::string& outputFile, idx_t numPartitions) {
-    idx_t nvtxs;     // Number of vertices
-    idx_t* xadj;     // Adjacency index array
-    idx_t* adjncy;   // Adjacency list array
-    idx_t* part;     // Partition vector
-    idx_t edgecut;   // Number of edge cuts
+    idx_t nvtxs;      // Number of vertices
+    idx_t* xadj;      // Adjacency index array
+    idx_t* adjncy;    // Adjacency list array
+    idx_t* adjwgt;    // Edge weight array
+    idx_t* part;      // Partition vector
+    idx_t edgecut;    // Number of edge cuts
 
     // Read the graph
-    readGraph(inputFile, nvtxs, xadj, adjncy);
+    readGraph(inputFile, nvtxs, xadj, adjncy, adjwgt);
 
     // Allocate memory for partition vector
     part = new idx_t[nvtxs];
@@ -21,16 +23,10 @@ void Partitioner::partitionGraph(const std::string& inputFile, const std::string
     idx_t options[METIS_NOPTIONS];  // Options array
     METIS_SetDefaultOptions(options);
 
-    idx_t* vwgt = NULL;             // Vertex weights (NULL for unweighted)
-    idx_t* vsize = NULL;            // Vertex sizes (NULL for default)
-    idx_t* adjwgt = NULL;           // Edge weights (NULL for unweighted)
-    real_t* tpwgts = NULL;          // Target partition weights (NULL for equal)
-    real_t* ubvec = NULL;           // Imbalance tolerance (NULL for default)
-
     // Partition the graph
     int result = METIS_PartGraphKway(
-        &nvtxs, &ncon, xadj, adjncy, vwgt, vsize, adjwgt, &numPartitions,
-        tpwgts, ubvec, options, &edgecut, part
+        &nvtxs, &ncon, xadj, adjncy, NULL, NULL, adjwgt, &numPartitions,
+        NULL, NULL, options, &edgecut, part
     );
 
     if (result == METIS_OK) {
@@ -43,11 +39,11 @@ void Partitioner::partitionGraph(const std::string& inputFile, const std::string
     // Free memory
     delete[] xadj;
     delete[] adjncy;
+    delete[] adjwgt;
     delete[] part;
 }
 
-
-void Partitioner::readGraph(const std::string& filename, idx_t& nvtxs, idx_t*& xadj, idx_t*& adjncy) {
+void Partitioner::readGraph(const std::string& filename, idx_t& nvtxs, idx_t*& xadj, idx_t*& adjncy, idx_t*& adjwgt) {
     std::ifstream file(filename);
     if (!file.is_open()) {
         throw std::runtime_error("Failed to open graph file.");
@@ -62,6 +58,7 @@ void Partitioner::readGraph(const std::string& filename, idx_t& nvtxs, idx_t*& x
 
     xadj = new idx_t[nvtxs + 1];
     adjncy = new idx_t[2 * numEdges];
+    adjwgt = new idx_t[2 * numEdges];
 
     idx_t edgeIndex = 0;
     xadj[0] = 0;
@@ -69,10 +66,12 @@ void Partitioner::readGraph(const std::string& filename, idx_t& nvtxs, idx_t*& x
     for (idx_t i = 0; i < nvtxs; ++i) {
         std::getline(file, line);
         std::istringstream iss(line);
-        idx_t neighbor;
+        idx_t neighbor, weight;
 
-        while (iss >> neighbor) {
-            adjncy[edgeIndex++] = neighbor - 1; // Convert to 0-based index
+        while (iss >> neighbor >> weight) {
+            adjncy[edgeIndex] = neighbor - 1; // Convert to 0-based index
+            adjwgt[edgeIndex] = weight;
+            ++edgeIndex;
         }
 
         xadj[i + 1] = edgeIndex;
