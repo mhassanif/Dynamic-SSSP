@@ -55,7 +55,9 @@ int main(int argc, char *argv[])
 
     // Run Dijkstra from source = 0
     std::vector<int> dist(num_vertices, INF);
+    std::vector<int> parent(num_vertices, -1);
     dist[0] = 0;
+
     using pii = std::pair<int, int>; // (distance, vertex)
     std::priority_queue<pii, std::vector<pii>, std::greater<>> pq;
     pq.push({0, 0});
@@ -74,6 +76,7 @@ int main(int argc, char *argv[])
             if (dist[u] + w < dist[v])
             {
                 dist[v] = dist[u] + w;
+                parent[v] = u;
                 pq.push({dist[v], v});
             }
         }
@@ -90,7 +93,12 @@ int main(int argc, char *argv[])
     outfile << num_vertices << " " << num_edges << "\n";
     for (int u = 0; u < num_vertices; ++u)
     {
-        outfile << u << " " << dist[u];
+        outfile << u << " " << parent[u] << " ";
+        if (dist[u] == INF)
+            outfile << -1;
+        else
+            outfile << dist[u];
+
         for (const auto &edge : adj[u])
         {
             outfile << " " << edge.to << " " << edge.weight;

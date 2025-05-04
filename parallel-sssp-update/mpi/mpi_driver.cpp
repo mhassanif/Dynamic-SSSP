@@ -1,4 +1,5 @@
 #include <mpi.h>
+#include <iostream>
 #include "comm_utils.h"
 #include "../core/sssp_update.h"
 #include "../core/graph_structs.h"
@@ -14,33 +15,41 @@ int main(int argc, char **argv)
     GraphPartition local_graph;
     load_partition(rank, local_graph);
 
-    int source = 0; // Set source from CLI if needed
-
-    // Initialize source vertex if owned by this rank
-    int local_idx = local_graph.global_to_local[source];
-    if (local_idx != -1)
+    int source = 0;
+    if (argc > 1)
     {
+        source = std::stoi(argv[1]);
+    }
+
+    auto it = local_graph.global_to_local.find(source);
+    if (it != local_graph.global_to_local.end())
+    {
+        int local_idx = it->second;
         local_graph.vertices[local_idx].distance = 0;
     }
 
-    // Step 1: identify affected vertices (if this is a dynamic update)
-    std::vector<int> changed_nodes; // empty or loaded based on use case
+    std::vector<int> changed_nodes; // for dynamic updates
     identifyAffectedVertices(local_graph, changed_nodes);
     propagateInfinity(local_graph);
 
-    // Main SSSP update loop
+    double start_time = MPI_Wtime();
+
     bool converged = false;
     while (!converged)
     {
         updateSSSP_OpenMP(local_graph, source);
-
-        exchange_boundary_data(local_graph); // ← must come before convergence check
-
+        exchange_boundary_data(local_graph);
         converged = check_global_convergence(local_graph);
 
-        // Clear update flags for next iteration
         for (auto &v : local_graph.vertices)
             v.updated = false;
+    }
+
+    double end_time = MPI_Wtime();
+
+    if (rank == 0)
+    {
+        std::cout << "SSSP converged in " << (end_time - start_time) << " seconds." << std::endl;
     }
 
     MPI_Finalize();

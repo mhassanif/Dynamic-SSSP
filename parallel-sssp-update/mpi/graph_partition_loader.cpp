@@ -5,7 +5,6 @@
 #include <unordered_map>
 #include <mpi.h>
 
-// Helper to load global ID to rank map
 std::unordered_map<int, int> load_vertex_owner_map(const std::string &filepath)
 {
     std::unordered_map<int, int> vertex_owner;
@@ -16,10 +15,12 @@ std::unordered_map<int, int> load_vertex_owner_map(const std::string &filepath)
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
 
-    int global_id, owner;
-    while (infile >> global_id >> owner)
+    int owner;
+    int global_id = 0;
+
+    while (infile >> owner)
     {
-        vertex_owner[global_id] = owner;
+        vertex_owner[global_id++] = owner;
     }
 
     return vertex_owner;
@@ -48,10 +49,11 @@ void load_partition(int rank, GraphPartition &g)
 
     for (int i = 0; i < num_vertices; ++i)
     {
-        int global_id, dist, num_edges;
-        infile >> global_id >> dist >> num_edges;
+        int global_id, parent, dist, num_edges;
+        infile >> global_id >> parent >> dist >> num_edges;
 
         g.vertices[i].id = global_id;
+        g.vertices[i].parent = parent;
         g.vertices[i].distance = dist;
         g.local_to_global[i] = global_id;
         g.global_to_local[global_id] = i;
@@ -90,7 +92,7 @@ void exchange_boundary_data(GraphPartition &g)
         }
     }
 
-    // First, exchange sizes
+    // Exchange sizes
     std::vector<int> send_counts(world_size, 0);
     std::vector<int> recv_counts(world_size, 0);
 
@@ -102,7 +104,7 @@ void exchange_boundary_data(GraphPartition &g)
     MPI_Alltoall(send_counts.data(), 1, MPI_INT,
                  recv_counts.data(), 1, MPI_INT, MPI_COMM_WORLD);
 
-    // Prepare send buffers and recv buffers
+    // Prepare send and receive buffers
     std::vector<std::vector<int>> send_buffers(world_size);
     std::vector<std::vector<int>> recv_buffers(world_size);
 
@@ -121,11 +123,12 @@ void exchange_boundary_data(GraphPartition &g)
         }
     }
 
-    // Exchange actual data
+    // Perform MPI communication
     std::vector<MPI_Request> requests;
+
     for (int i = 0; i < world_size; ++i)
     {
-        if (send_counts[i] > 0)
+        if (!send_buffers[i].empty())
         {
             MPI_Request req;
             MPI_Isend(send_buffers[i].data(), send_buffers[i].size(), MPI_INT, i, 0, MPI_COMM_WORLD, &req);
@@ -135,7 +138,7 @@ void exchange_boundary_data(GraphPartition &g)
 
     for (int i = 0; i < world_size; ++i)
     {
-        if (recv_counts[i] > 0)
+        if (!recv_buffers[i].empty())
         {
             MPI_Request req;
             MPI_Irecv(recv_buffers[i].data(), recv_buffers[i].size(), MPI_INT, i, 0, MPI_COMM_WORLD, &req);
@@ -145,7 +148,7 @@ void exchange_boundary_data(GraphPartition &g)
 
     MPI_Waitall(static_cast<int>(requests.size()), requests.data(), MPI_STATUSES_IGNORE);
 
-    // Update local ghost vertices using received data
+    // Process received data to update ghost vertices
     for (int i = 0; i < world_size; ++i)
     {
         for (size_t j = 0; j < recv_buffers[i].size(); j += 2)
@@ -153,11 +156,11 @@ void exchange_boundary_data(GraphPartition &g)
             int gid = recv_buffers[i][j];
             int dist = recv_buffers[i][j + 1];
 
-            auto it = g.global_to_local.begin();
-            if (gid < g.global_to_local.size())
+            auto it = g.global_to_local.find(gid);
+            if (it != g.global_to_local.end())
             {
-                int local_idx = g.global_to_local[gid];
-                if (local_idx >= 0 && local_idx < g.vertices.size())
+                int local_idx = it->second;
+                if (local_idx >= 0 && local_idx < static_cast<int>(g.vertices.size()))
                 {
                     Vertex &v = g.vertices[local_idx];
                     if (dist < v.distance)
