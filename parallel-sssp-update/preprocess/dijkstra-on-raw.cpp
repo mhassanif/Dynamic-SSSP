@@ -5,6 +5,7 @@
 #include <queue>
 #include <limits>
 #include <string>
+#include <chrono> // For timing
 
 const int INF = std::numeric_limits<int>::max();
 
@@ -37,7 +38,6 @@ int main(int argc, char *argv[])
 
     std::vector<std::vector<Edge>> adj(num_vertices);
 
-    // Read adjacency list
     std::string line;
     std::getline(infile, line); // Consume leftover newline
 
@@ -53,7 +53,6 @@ int main(int argc, char *argv[])
     }
     infile.close();
 
-    // Run Dijkstra from source = 0
     std::vector<int> dist(num_vertices, INF);
     std::vector<int> parent(num_vertices, -1);
     dist[0] = 0;
@@ -61,6 +60,9 @@ int main(int argc, char *argv[])
     using pii = std::pair<int, int>; // (distance, vertex)
     std::priority_queue<pii, std::vector<pii>, std::greater<>> pq;
     pq.push({0, 0});
+
+    // Start timing
+    auto start_time = std::chrono::high_resolution_clock::now();
 
     while (!pq.empty())
     {
@@ -82,7 +84,11 @@ int main(int argc, char *argv[])
         }
     }
 
-    // Write output in preprocessed format
+    // End timing
+    auto end_time = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end_time - start_time;
+    std::cout << "Dijkstra execution time: " << elapsed.count() << " seconds\n";
+
     std::ofstream outfile(output_file);
     if (!outfile)
     {
@@ -94,10 +100,7 @@ int main(int argc, char *argv[])
     for (int u = 0; u < num_vertices; ++u)
     {
         outfile << u << " " << parent[u] << " ";
-        if (dist[u] == INF)
-            outfile << -1;
-        else
-            outfile << dist[u];
+        outfile << (dist[u] == INF ? -1 : dist[u]);
 
         for (const auto &edge : adj[u])
         {
