@@ -280,6 +280,17 @@ int main(int argc, char **argv) {
     GraphPartition g;
     load_full_graph(graph_file, g);
 
+        // Dump graph structure for debugging
+std::cout << "------ Initial Graph Structure ------\n";
+for (const auto &v : g.vertices) {
+    std::cout << "Vertex " << v.id << " (dist=" << v.distance << ", parent=" << v.parent << ") -> ";
+    for (const auto &e : v.edges) {
+        std::cout << "(" << e.dest << ", w=" << e.weight << ") ";
+    }
+    std::cout << "\n";
+}
+std::cout << "-------------------------------------\n";
+
     // Set source distance
     if (g.global_to_local.count(source))
         g.vertices[g.global_to_local[source]].distance = 0;
@@ -321,6 +332,17 @@ int main(int argc, char **argv) {
             }
         }
     }
+
+    // Dump graph structure for debugging
+std::cout << "------ post insertion/deletions Graph Structure ------\n";
+for (const auto &v : g.vertices) {
+    std::cout << "Vertex " << v.id << " (dist=" << v.distance << ", parent=" << v.parent << ") -> ";
+    for (const auto &e : v.edges) {
+        std::cout << "(" << e.dest << ", w=" << e.weight << ") ";
+    }
+    std::cout << "\n";
+}
+std::cout << "-------------------------------------\n";
 
     // Run update
     auto start = std::chrono::high_resolution_clock::now();
