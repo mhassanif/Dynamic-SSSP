@@ -55,7 +55,7 @@ void writeSubgraph(const string& filename, const set<int>& vertices, const vecto
         exit(1);
     }
 
-    outFile << vertices.size() << " " << "placeholder_edges_count" << endl; // Placeholder for edge count
+    outFile << vertices.size() << endl; // Placeholder for edge count
     for (int vertex : vertices) {
         outFile << graph[vertex][0] << endl; // Write the full line corresponding to the vertex
     }
