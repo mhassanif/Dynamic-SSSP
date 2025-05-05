@@ -11,6 +11,7 @@ void identifyAffectedVertices(
     for (auto& v : g.vertices) {
         v.affected = false;
         v.updated = false;
+        v.affectedDel = false;
     }
 
     // === Deletions (Undirected) ===
@@ -34,10 +35,10 @@ void identifyAffectedVertices(
             g.vertices[y].parent = -1;
             g.vertices[y].updated = true;
             g.vertices[y].affected = true;
+            g.vertices[y].affectedDel = true;
         }
 
         // Optional: remove the edge from both endpoints' edge lists
-        // (You can skip this if deletions are logical only)
         Vu.edges.erase(std::remove_if(Vu.edges.begin(), Vu.edges.end(),
                         [v_gid](const Edge& e) { return e.dest == v_gid; }),
                         Vu.edges.end());
@@ -62,7 +63,6 @@ void identifyAffectedVertices(
             int lu = g.global_to_local[u_gid];
             Vertex& Vu = g.vertices[lu];
 
-            // Check if v_gid is reachable via mapping (remote or local)
             if (g.vertex_owner.count(v_gid)) {
                 int lv = v_local ? g.global_to_local[v_gid] : -1;
                 int v_dist = v_local ? g.vertices[lv].distance : INF_DIST;
@@ -73,7 +73,6 @@ void identifyAffectedVertices(
                     Vu.affected = true;
                 }
 
-                // Add the edge if it doesn't already exist
                 bool exists = std::any_of(Vu.edges.begin(), Vu.edges.end(),
                     [v_gid](const Edge& e) { return e.dest == v_gid; });
                 if (!exists) {
@@ -96,7 +95,6 @@ void identifyAffectedVertices(
                     Vv.affected = true;
                 }
 
-                // Add the edge if it doesn't already exist
                 bool exists = std::any_of(Vv.edges.begin(), Vv.edges.end(),
                     [u_gid](const Edge& e) { return e.dest == u_gid; });
                 if (!exists) {
@@ -109,36 +107,45 @@ void identifyAffectedVertices(
 
 
 
+// Propagate infinite distance along tree-children per Algorithm 3 (lines 2–8)
 void propagateInfinity(GraphPartition& g) {
-    bool again = true;
-    while(again) {
-        again = false;
-        #pragma omp parallel for
-        for(int i = 0; i < g.num_vertices; ++i) {
-            Vertex& v = g.vertices[i];
-            if(v.updated) {
-                v.updated = false;
-                for(const Edge& e : v.edges) {
-                    int lc = g.global_to_local[e.dest];
-                    Vertex& c = g.vertices[lc];
-                    if(c.distance != INF_DIST) {
-                        c.distance = INF_DIST;
-                        c.parent = -1;
-                        c.updated = true;
-                        c.affected = true;
-                        again = true;
+    // Build child lists from parent pointers
+    std::vector<std::vector<int>> children(g.num_vertices);
+    for (int i = 0; i < g.num_vertices; ++i) {
+        int p = g.vertices[i].parent;
+        if (p >= 0) children[p].push_back(i);
+    }
+
+    // Flood INF_DIST down disconnected subtrees
+    while (true) {
+        bool any = false;
+        #pragma omp parallel for reduction(||:any)
+        for (int v = 0; v < g.num_vertices; ++v) {
+            if (g.vertices[v].affectedDel) {
+                // Reset for this level
+                g.vertices[v].affectedDel = false;
+                // For each tree-child, disconnect
+                for (int c : children[v]) {
+                    if (g.vertices[c].distance != INF_DIST) {
+                        g.vertices[c].distance = INF_DIST;
+                        g.vertices[c].parent = -1;
+                        g.vertices[c].affectedDel = true; // next round
+                        g.vertices[c].affected = true;    // later relaxations
+                        any = true;
                     }
                 }
             }
         }
+        if (!any) break;
     }
 }
+
 
 void updateSSSP_OpenMP(GraphPartition& g, int source_gid) {
     // Initialize source in local partition
     int src = g.global_to_local[source_gid];
     g.vertices[src].distance = 0;
-    g.vertices[src].parent = src;
+    g.vertices[src].parent = -1;
     g.vertices[src].affected = true;
 
     bool again = true;

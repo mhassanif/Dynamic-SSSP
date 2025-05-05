@@ -348,7 +348,30 @@ std::cout << "-------------------------------------\n";
     auto start = std::chrono::high_resolution_clock::now();
 
     identifyAffectedVertices(g, deletions, insertions);
+
+    std::cout << "------ Affected Vertices After Identification ------\n";
+for (const auto &v : g.vertices) {
+    if (v.affected) {
+        std::cout << "Vertex " << v.id << " marked as affected (distance: " 
+                  << v.distance << ", parent: " << v.parent << ")\n";
+    }
+}
+std::cout << "-----------------------------------------------------\n";
+
+
+
     propagateInfinity(g);
+
+            // Dump graph structure for debugging
+std::cout << "------ Initial Graph Structure ------\n";
+for (const auto &v : g.vertices) {
+    std::cout << "Vertex " << v.id << " (dist=" << v.distance << ", parent=" << v.parent << ") -> ";
+    for (const auto &e : v.edges) {
+        std::cout << "(" << e.dest << ", w=" << e.weight << ") ";
+    }
+    std::cout << "\n";
+}
+std::cout << "-------------------------------------\n";
 
     bool converged = false;
     while (!converged) {
