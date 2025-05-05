@@ -28,7 +28,7 @@ std::unordered_map<int, int> load_vertex_owner_map(const std::string &filepath)
 
 void load_partition(int rank, GraphPartition &g)
 {
-    // Load vertex owner map (you may already have this)
+    // Load vertex owner map
     g.vertex_owner = load_vertex_owner_map("data/metis_output/division.txt");
 
     // Load partition data
@@ -43,37 +43,39 @@ void load_partition(int rank, GraphPartition &g)
     int num_vertices;
     infile >> num_vertices;
     g.initialize(num_vertices);
-
-    // Resize local-global mappings
     g.local_to_global.resize(num_vertices);
+
+    std::string line;
+    std::getline(infile, line); // consume leftover newline after num_vertices
 
     for (int i = 0; i < num_vertices; ++i)
     {
-        int global_id, parent, dist;
-        infile >> global_id >> parent >> dist;
+        if (!std::getline(infile, line)) {
+            std::cerr << "Unexpected end of file while reading vertex " << i << std::endl;
+            MPI_Abort(MPI_COMM_WORLD, 1);
+        }
 
-        // Initialize vertex with global id, parent, and distance
+        std::istringstream iss(line);
+        int global_id, parent, dist;
+        iss >> global_id >> parent >> dist;
+
         g.vertices[i].id = global_id;
         g.vertices[i].parent = parent;
         g.vertices[i].distance = dist;
         g.local_to_global[i] = global_id;
         g.global_to_local[global_id] = i;
 
-        // Now, load the edges for this vertex. There will be pairs of "neighbor weight".
-        while (infile)
-        {
-            int dest, weight;
-            infile >> dest >> weight;
-            if (infile) // Only add edges if data is available
-            {
-                g.vertices[i].edges.push_back({dest, weight});
+        int dest, weight;
+        while (iss >> dest && dest != -1) {
+            if (!(iss >> weight)) {
+                std::cerr << "Incomplete edge for vertex " << global_id << std::endl;
+                MPI_Abort(MPI_COMM_WORLD, 1);
             }
+            g.vertices[i].edges.push_back({dest, weight});
         }
-
-        // Reset the stream to prevent it from reaching EOF prematurely
-        infile.clear();
     }
 }
+
 
 
 // Exchange distances of boundary vertices with other ranks
