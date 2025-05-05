@@ -1,6 +1,12 @@
 # VS Code settings
 .vscode/
 
-# all executables
+# All executables
 *.exe
 *.out
+
+# Linux executables (common binary file extensions)
+*.bin
+*.so
+
+sssp_update
