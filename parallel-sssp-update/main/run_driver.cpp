@@ -20,6 +20,7 @@ struct ChangeLog
     int new_parent;
 };
 
+// Parse edge insertions and deletions from file
 void parse_updates(const std::string &insert_file, const std::string &delete_file,
                    std::vector<std::tuple<int, int, int>> &insertions,
                    std::vector<std::pair<int, int>> &deletions)
@@ -28,14 +29,10 @@ void parse_updates(const std::string &insert_file, const std::string &delete_fil
     int u, v, w;
 
     while (ins >> u >> v >> w)
-    {
         insertions.emplace_back(u, v, w);
-    }
 
     while (dels >> u >> v)
-    {
         deletions.emplace_back(u, v);
-    }
 }
 
 int main(int argc, char **argv)
@@ -58,39 +55,72 @@ int main(int argc, char **argv)
     std::string delete_file = argv[2];
     int source = (argc > 3) ? std::stoi(argv[3]) : 0;
 
+    // ---------------------------
+    // Step 1: Load local partition
+    // ---------------------------
     GraphPartition local_graph;
     load_partition(rank, local_graph);
 
     // Set source distance = 0 if local
-    auto it = local_graph.global_to_local.find(source);
-    if (it != local_graph.global_to_local.end())
+    auto src_it = local_graph.global_to_local.find(source);
+    if (src_it != local_graph.global_to_local.end())
     {
-        int local_idx = it->second;
-        local_graph.vertices[local_idx].distance = 0;
+        int local_src = src_it->second;
+        local_graph.vertices[local_src].distance = 0;
     }
 
-    // Parse edge updates
+    // -----------------------------------------
+    // Step 2: Parse edge insertions/deletions
+    // -----------------------------------------
     std::vector<std::tuple<int, int, int>> insertions;
     std::vector<std::pair<int, int>> deletions;
     parse_updates(insert_file, delete_file, insertions, deletions);
 
-    // Save old state of all vertices for comparison
-    std::unordered_map<int, std::pair<int, int>> old_state;
-    for (const auto &v : local_graph.vertices)
+    // ------------------------------------------------
+    // Step 3: Apply edge insertions to graph structure
+    // ------------------------------------------------
+    for (const auto &[u_gid, v_gid, weight] : insertions)
     {
-        old_state[v.global_id] = {v.distance, v.parent};
+        for (int gid : {u_gid, v_gid})
+        {
+            if (local_graph.global_to_local.count(gid) == 0)
+                continue;
+            int local_idx = local_graph.global_to_local[gid];
+            Vertex &v = local_graph.vertices[local_idx];
+            int other_gid = (gid == u_gid) ? v_gid : u_gid;
+
+            // Avoid inserting duplicate edge (optional)
+            bool already_exists = false;
+            for (const Edge &e : v.edges)
+            {
+                if (e.dest == other_gid)
+                {
+                    already_exists = true;
+                    break;
+                }
+            }
+            if (!already_exists)
+            {
+                v.edges.push_back({other_gid, weight});
+            }
+        }
     }
 
-    // Begin timing
+    // ----------------------------------------
+    // Step 4: Save old distances/parents
+    // ----------------------------------------
+    std::unordered_map<int, std::pair<int, int>> old_state;
+    for (const auto &v : local_graph.vertices)
+        old_state[v.id] = {v.distance, v.parent};
+
+    // ----------------------------------------
+    // Step 5: Start timer and run update phase
+    // ----------------------------------------
     double start_time = MPI_Wtime();
 
-    // Step 1: Identify affected vertices from edge updates
     identifyAffectedVertices(local_graph, deletions, insertions);
-
-    // Step 2: Propagate infinity to unreachable nodes
     propagateInfinity(local_graph);
 
-    // Step 3: SSSP update loop
     bool converged = false;
     while (!converged)
     {
@@ -104,27 +134,27 @@ int main(int argc, char **argv)
 
     double end_time = MPI_Wtime();
 
-    // Step 4: Gather and print results
+    // ----------------------------------------
+    // Step 6: Collect change logs
+    // ----------------------------------------
     std::vector<ChangeLog> local_changes;
     for (const auto &v : local_graph.vertices)
     {
-        auto it = old_state.find(v.global_id);
+        auto it = old_state.find(v.id);
         if (it != old_state.end())
         {
             int old_dist = it->second.first;
             int old_par = it->second.second;
             if (v.distance != old_dist || v.parent != old_par)
             {
-                local_changes.push_back({v.global_id,
-                                         old_dist,
-                                         v.distance,
-                                         old_par,
-                                         v.parent});
+                local_changes.push_back({v.id, old_dist, v.distance, old_par, v.parent});
             }
         }
     }
 
-    // Gather change logs at rank 0
+    // ----------------------------------------
+    // Step 7: Gather logs at rank 0
+    // ----------------------------------------
     std::vector<int> recv_counts(size);
     int local_count = local_changes.size();
     MPI_Gather(&local_count, 1, MPI_INT, recv_counts.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
@@ -150,6 +180,9 @@ int main(int argc, char **argv)
                 all_changes.data(), recv_counts.data(), displs.data(),
                 MPI_ChangeLog, 0, MPI_COMM_WORLD);
 
+    // ----------------------------------------
+    // Step 8: Print results
+    // ----------------------------------------
     if (rank == 0)
     {
         std::cout << "-------------------------------------------\n";
