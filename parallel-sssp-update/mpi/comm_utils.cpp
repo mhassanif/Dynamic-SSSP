@@ -28,11 +28,11 @@ std::unordered_map<int, int> load_vertex_owner_map(const std::string &filepath)
 
 void load_partition(int rank, GraphPartition &g)
 {
-    // Load vertex owner map
-    g.vertex_owner = load_vertex_owner_map("partition/vertex_owner.txt");
+    // Load vertex owner map (you may already have this)
+    g.vertex_owner = load_vertex_owner_map("data/metis_output/division.txt");
 
     // Load partition data
-    std::string filename = "partitions/partition_" + std::to_string(rank) + ".txt";
+    std::string filename = "data/metis_output/subgraph_" + std::to_string(rank) + ".txt";
     std::ifstream infile(filename);
     if (!infile)
     {
@@ -49,23 +49,32 @@ void load_partition(int rank, GraphPartition &g)
 
     for (int i = 0; i < num_vertices; ++i)
     {
-        int global_id, parent, dist, num_edges;
-        infile >> global_id >> parent >> dist >> num_edges;
+        int global_id, parent, dist;
+        infile >> global_id >> parent >> dist;
 
+        // Initialize vertex with global id, parent, and distance
         g.vertices[i].id = global_id;
         g.vertices[i].parent = parent;
         g.vertices[i].distance = dist;
         g.local_to_global[i] = global_id;
         g.global_to_local[global_id] = i;
 
-        for (int j = 0; j < num_edges; ++j)
+        // Now, load the edges for this vertex. There will be pairs of "neighbor weight".
+        while (infile)
         {
             int dest, weight;
             infile >> dest >> weight;
-            g.vertices[i].edges.push_back({dest, weight});
+            if (infile) // Only add edges if data is available
+            {
+                g.vertices[i].edges.push_back({dest, weight});
+            }
         }
+
+        // Reset the stream to prevent it from reaching EOF prematurely
+        infile.clear();
     }
 }
+
 
 // Exchange distances of boundary vertices with other ranks
 void exchange_boundary_data(GraphPartition &g)
