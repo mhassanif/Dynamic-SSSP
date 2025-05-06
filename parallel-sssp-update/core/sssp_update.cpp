@@ -94,95 +94,31 @@ void identifyAffectedVertices(
 
 
 // Propagate infinite distance along tree-children per Algorithm 3 (lines 2–8)
+// 2) propagateInfinity: guard every global_to_local lookup on e.dest
 void propagateInfinity(GraphPartition& g) {
-    // Build child lists from parent pointers
+    // build children by local‐parent → local‐child
     std::vector<std::vector<int>> children(g.num_vertices);
     for (int i = 0; i < g.num_vertices; ++i) {
-        int p = g.vertices[i].parent;
-        if (p >= 0) children[p].push_back(i);
+        int lp = g.vertices[i].parent;
+        if (lp >= 0 && lp < g.num_vertices)
+            children[lp].push_back(i);
     }
-
-    // Flood INF_DIST down disconnected subtrees
-    while (true) {
-        bool any = false;
-        #pragma omp parallel for reduction(||:any)
-        for (int v = 0; v < g.num_vertices; ++v) {
-            if (g.vertices[v].affectedDel) {
-                // Reset for this level
-                g.vertices[v].affectedDel = false;
-                // For each tree-child, disconnect
-                for (int c : children[v]) {
-                    if (g.vertices[c].distance != INF_DIST) {
-                        g.vertices[c].distance = INF_DIST;
-                        g.vertices[c].parent = -1;
-                        g.vertices[c].affectedDel = true; // next round
-                        g.vertices[c].affected = true;    // later relaxations
-                        any = true;
-                    }
-                }
-            }
-        }
-        if (!any) break;
-    }
-}
-
-
-void updateSSSP_OpenMP(GraphPartition& g, int source_gid) {
-    // Initialize source in local partition
-    int src = g.global_to_local[source_gid];
-    g.vertices[src].distance = 0;
-    g.vertices[src].parent = -1;
-    g.vertices[src].affected = true;
 
     bool again = true;
     while (again) {
         again = false;
-        #pragma omp parallel for
-        for (int i = 0; i < g.num_vertices; ++i) {
-            Vertex& v = g.vertices[i];
-            if (v.affected) {
-                v.affected = false;
-                
-                // Debugging output: Track when a vertex is being processed
-                std::cout << "Processing vertex (local index " << i << ", global id " << v.id << ") "
-                          << "(distance: " << v.distance << ", affected: " << v.affected << ")" << std::endl;
-
-                for (const Edge& e : v.edges) {
-                    int nl = g.global_to_local[e.dest];
-                    Vertex& vn = g.vertices[nl];
-
-                    // Check if v.distance is INF_DIST before updating
-                    int alt = INF_DIST;
-                    if (v.distance != INF_DIST) {
-                        alt = v.distance + e.weight;
-                    }
-
-                    // If the new alt is a valid update (alt < INF_DIST and alt < vn.distance)
-                    if (alt < vn.distance) {
-                        vn.distance = alt;
-                        vn.parent = i;
-                        vn.affected = true;
-                        again = true;
-
-                        // Debugging output: Log when an update occurs
-                        std::cout << "Vertex (local index " << nl << ", global id " << vn.id << ") updated: "
-                                  << "distance = " << vn.distance << ", parent = " << vn.parent << std::endl;
-                    }
-
-                    // Similarly, check for the reverse edge from the neighbor to v
-                    if (vn.distance != INF_DIST) {
-                        alt = vn.distance + e.weight;
-                        if (alt < v.distance) {
-                            v.distance = alt;
-                            v.parent = nl;
-                            v.affected = true;
-                            again = true;
-
-                            // Debugging output: Log when an update occurs
-                            std::cout << "Vertex (local index " << i << ", global id " << v.id << ") updated: "
-                                      << "distance = " << v.distance << ", parent = " << v.parent << std::endl;
-                        }
-                    }
+        #pragma omp parallel for schedule(dynamic) reduction(||:again)
+        for (int v = 0; v < g.num_vertices; ++v) {
+            if (!g.vertices[v].affectedDel) continue;
+            g.vertices[v].affectedDel = false;
+            for (int c : children[v]) {
+                auto &Cv = g.vertices[c];
+                if (Cv.distance != INF_DIST) {
+                    Cv.distance     = INF_DIST;
+                    Cv.parent       = -1;
+                    Cv.affected     = true;
+                    Cv.affectedDel = true;
+                    again = true;
                 }
             }
         }
@@ -190,3 +126,51 @@ void updateSSSP_OpenMP(GraphPartition& g, int source_gid) {
 }
 
 
+// 3) updateSSSP_OpenMP: guard every e.dest lookup
+void updateSSSP_OpenMP(GraphPartition& g, int source_gid) {
+    // Safe source init
+    auto it_src = g.global_to_local.find(source_gid);
+    if (it_src != g.global_to_local.end()) {
+        int src = it_src->second;
+        g.vertices[src].distance     = 0;
+        g.vertices[src].parent       = -1;
+        g.vertices[src].affected     = true;
+        g.vertices[src].affectedDel = false;
+    }
+
+    bool again = true;
+    while (again) {
+        again = false;
+        #pragma omp parallel for schedule(dynamic) reduction(||:again)
+        for (int i = 0; i < g.num_vertices; ++i) {
+            auto &v = g.vertices[i];
+            if (!v.affected) continue;
+            v.affected = false;
+
+            for (const auto &e : v.edges) {
+                auto it_n = g.global_to_local.find(e.dest);
+                if (it_n == g.global_to_local.end()) continue;
+                int nl = it_n->second;
+                auto &vn = g.vertices[nl];
+
+                int alt = (v.distance == INF_DIST) ? INF_DIST : v.distance + e.weight;
+                if (alt < vn.distance) {
+                    vn.distance = alt;
+                    vn.parent   = i;
+                    vn.affected = true;
+                    again       = true;
+                }
+
+                if (vn.distance != INF_DIST) {
+                    int alt2 = vn.distance + e.weight;
+                    if (alt2 < v.distance) {
+                        v.distance = alt2;
+                        v.parent   = nl;
+                        v.affected = true;
+                        again      = true;
+                    }
+                }
+            }
+        }
+    }
+}

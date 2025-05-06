@@ -25,7 +25,6 @@ std::unordered_map<int, int> load_vertex_owner_map(const std::string &filepath)
 
     return vertex_owner;
 }
-
 void load_partition(int rank, GraphPartition &g)
 {
     // Load vertex owner map
@@ -34,9 +33,8 @@ void load_partition(int rank, GraphPartition &g)
     // Load partition data
     std::string filename = "data/metis_output/subgraph_" + std::to_string(rank) + ".txt";
     std::ifstream infile(filename);
-    if (!infile)
-    {
-        std::cerr << "Rank " << rank << " failed to load file: " << filename << std::endl;
+    if (!infile) {
+        std::cerr << "Rank " << rank << " failed to load file: " << filename << "\n";
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
 
@@ -45,33 +43,56 @@ void load_partition(int rank, GraphPartition &g)
     g.initialize(num_vertices);
     g.local_to_global.resize(num_vertices);
 
+    // consume leftover newline
     std::string line;
-    std::getline(infile, line); // consume leftover newline after num_vertices
+    std::getline(infile, line);
 
-    for (int i = 0; i < num_vertices; ++i)
-    {
+    // Stage: read each line: global_id, global_parent, dist, [edges...] terminated by -1
+    for (int i = 0; i < num_vertices; ++i) {
         if (!std::getline(infile, line)) {
-            std::cerr << "Unexpected end of file while reading vertex " << i << std::endl;
+            std::cerr << "Unexpected EOF reading vertex " << i << "\n";
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
 
         std::istringstream iss(line);
-        int global_id, parent, dist;
-        iss >> global_id >> parent >> dist;
+        int global_id, global_parent, dist;
+        iss >> global_id >> global_parent >> dist;
 
-        g.vertices[i].id = global_id;
-        g.vertices[i].parent = parent;
+        // assign id and distance
+        g.vertices[i].id       = global_id;
         g.vertices[i].distance = dist;
-        g.local_to_global[i] = global_id;
+
+        // convert global_parent → local index (or -1 if parent lives off‐rank)
+        auto pit = g.global_to_local.find(global_parent);
+        g.vertices[i].parent = (pit == g.global_to_local.end()
+                                ? -1
+                                : pit->second);
+
+        // record mappings
+        g.local_to_global[i]        = global_id;
         g.global_to_local[global_id] = i;
 
+        // read edges until sentinel -1
         int dest, weight;
         while (iss >> dest && dest != -1) {
             if (!(iss >> weight)) {
-                std::cerr << "Incomplete edge for vertex " << global_id << std::endl;
+                std::cerr << "Incomplete edge entry for vertex " << global_id << "\n";
                 MPI_Abort(MPI_COMM_WORLD, 1);
             }
-            g.vertices[i].edges.push_back({dest, weight});
+            g.vertices[i].edges.push_back({ dest, weight });
+        }
+    }
+
+    // Mark boundary vertices
+    for (int i = 0; i < g.num_vertices; ++i) {
+        auto &v = g.vertices[i];
+        v.is_boundary = false;
+        for (auto &e : v.edges) {
+            int owner = g.vertex_owner[e.dest];
+            if (owner != rank) {
+                v.is_boundary = true;
+                break;
+            }
         }
     }
 }
