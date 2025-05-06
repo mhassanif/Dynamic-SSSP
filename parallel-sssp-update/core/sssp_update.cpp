@@ -134,25 +134,44 @@ void updateSSSP_OpenMP(GraphPartition& g, int source_gid) {
     g.vertices[src].affected = true;
 
     bool again = true;
-    while(again) {
+    while (again) {
         again = false;
         #pragma omp parallel for
-        for(int i = 0; i < g.num_vertices; ++i) {
+        for (int i = 0; i < g.num_vertices; ++i) {
             Vertex& v = g.vertices[i];
-            if(v.affected) {
+            if (v.affected) {
                 v.affected = false;
-                for(const Edge& e : v.edges) {
+                for (const Edge& e : v.edges) {
                     int nl = g.global_to_local[e.dest];
                     Vertex& vn = g.vertices[nl];
-                    int alt = v.distance + e.weight;
-                    if(alt < vn.distance) {
+
+                    // Check if v.distance is INF_DIST before updating
+                    int alt = INF_DIST;
+                    if (v.distance != INF_DIST) {
+                        alt = v.distance + e.weight;
+                    }
+
+                    // If the new alt is a valid update (alt < INF_DIST and alt < vn.distance)
+                    if (alt < vn.distance) {
                         vn.distance = alt;
                         vn.parent = i;
                         vn.affected = true;
                         again = true;
+                    }
+
+                    // Similarly, check for the reverse edge from the neighbor to v
+                    if (vn.distance != INF_DIST) {
+                        alt = vn.distance + e.weight;
+                        if (alt < v.distance) {
+                            v.distance = alt;
+                            v.parent = nl;
+                            v.affected = true;
+                            again = true;
+                        }
                     }
                 }
             }
         }
     }
 }
+
