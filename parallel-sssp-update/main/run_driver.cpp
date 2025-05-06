@@ -382,7 +382,10 @@ std::cout << "-------------------------------------\n";
 
     identifyAffectedVertices(g, deletions, insertions);
 
-    std::cout << "------ Affected Vertices After Identification ------\n";
+
+    propagateInfinity(g);
+
+        std::cout << "------ Affected Vertices After Identification and propagation ------\n";
 for (const auto &v : g.vertices) {
     if (v.affected) {
         std::cout << "Vertex " << v.id << " marked as affected (distance: " 
@@ -391,9 +394,6 @@ for (const auto &v : g.vertices) {
 }
 std::cout << "-----------------------------------------------------\n";
 
-
-
-    propagateInfinity(g);
 
             // Dump graph structure for debugging
 std::cout << "------ post propagation Graph Structure ------\n";
