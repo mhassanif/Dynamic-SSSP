@@ -142,10 +142,6 @@ void updateSSSP_OpenMP(GraphPartition& g, int source_gid) {
             Vertex& v = g.vertices[i];
             if (v.affected) {
                 v.affected = false;
-                
-                // Debugging output: Track when a vertex is being processed
-                std::cout << "Processing vertex (local index " << i << ", global id " << v.id << ") "
-                          << "(distance: " << v.distance << ", affected: " << v.affected << ")" << std::endl;
 
                 for (const Edge& e : v.edges) {
                     int nl = g.global_to_local[e.dest];
@@ -163,10 +159,6 @@ void updateSSSP_OpenMP(GraphPartition& g, int source_gid) {
                         vn.parent = i;
                         vn.affected = true;
                         again = true;
-
-                        // Debugging output: Log when an update occurs
-                        std::cout << "Vertex (local index " << nl << ", global id " << vn.id << ") updated: "
-                                  << "distance = " << vn.distance << ", parent = " << vn.parent << std::endl;
                     }
 
                     // Similarly, check for the reverse edge from the neighbor to v
@@ -178,9 +170,6 @@ void updateSSSP_OpenMP(GraphPartition& g, int source_gid) {
                             v.affected = true;
                             again = true;
 
-                            // Debugging output: Log when an update occurs
-                            std::cout << "Vertex (local index " << i << ", global id " << v.id << ") updated: "
-                                      << "distance = " << v.distance << ", parent = " << v.parent << std::endl;
                         }
                     }
                 }
