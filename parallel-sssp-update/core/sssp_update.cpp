@@ -7,28 +7,28 @@ void identifyAffectedVertices(
     const std::vector<std::pair<int, int>>& deletions,
     const std::vector<std::tuple<int, int, int>>& insertions)
 {
-    // Reset flags
+    // Step 2: Reset all flags
     for (auto& v : g.vertices) {
         v.affected = false;
         v.updated = false;
         v.affectedDel = false;
     }
 
-    // === Deletions (Undirected) ===
+    // Step 3–9: Process deletions
     #pragma omp parallel for
     for (size_t i = 0; i < deletions.size(); ++i) {
         int u_gid = deletions[i].first;
         int v_gid = deletions[i].second;
 
         if (g.global_to_local.count(u_gid) == 0 || g.global_to_local.count(v_gid) == 0)
-            continue;  // Not in this partition
+            continue;
 
         int lu = g.global_to_local[u_gid];
         int lv = g.global_to_local[v_gid];
         Vertex& Vu = g.vertices[lu];
         Vertex& Vv = g.vertices[lv];
 
-        // If edge was part of the tree, invalidate the deeper one
+        // If edge (u,v) is in T, remove deeper one
         if (Vu.parent == lv || Vv.parent == lu) {
             int y = (Vu.distance > Vv.distance ? lu : lv);
             g.vertices[y].distance = INF_DIST;
@@ -38,7 +38,6 @@ void identifyAffectedVertices(
             g.vertices[y].affectedDel = true;
         }
 
-        // Optional: remove the edge from both endpoints' edge lists
         Vu.edges.erase(std::remove_if(Vu.edges.begin(), Vu.edges.end(),
                         [v_gid](const Edge& e) { return e.dest == v_gid; }),
                         Vu.edges.end());
@@ -47,63 +46,49 @@ void identifyAffectedVertices(
                         Vv.edges.end());
     }
 
-    // === Insertions (Undirected) ===
+    // Step 10–19: Process insertions
     #pragma omp parallel for
     for (size_t i = 0; i < insertions.size(); ++i) {
         int u_gid, v_gid, w;
         std::tie(u_gid, v_gid, w) = insertions[i];
 
-        if (g.global_to_local.count(u_gid) == 0 && g.global_to_local.count(v_gid) == 0)
-            continue; // Neither endpoint is in this partition
-
         bool u_local = g.global_to_local.count(u_gid);
         bool v_local = g.global_to_local.count(v_gid);
 
-        if (u_local) {
-            int lu = g.global_to_local[u_gid];
-            Vertex& Vu = g.vertices[lu];
+        int lu = u_local ? g.global_to_local[u_gid] : -1;
+        int lv = v_local ? g.global_to_local[v_gid] : -1;
 
-            if (g.vertex_owner.count(v_gid)) {
-                int lv = v_local ? g.global_to_local[v_gid] : -1;
-                int v_dist = v_local ? g.vertices[lv].distance : INF_DIST;
+        int u_dist = u_local ? g.vertices[lu].distance : INF_DIST;
+        int v_dist = v_local ? g.vertices[lv].distance : INF_DIST;
 
-                if (v_local && Vu.distance > v_dist + w) {
-                    Vu.distance = v_dist + w;
-                    Vu.parent = lv;
-                    Vu.affected = true;
-                }
-
-                bool exists = std::any_of(Vu.edges.begin(), Vu.edges.end(),
-                    [v_gid](const Edge& e) { return e.dest == v_gid; });
-                if (!exists) {
-                    Vu.edges.push_back({v_gid, w});
-                }
-            }
+        int x_gid, y_gid, x_dist;
+        if (u_dist <= v_dist) {
+            x_gid = u_gid; y_gid = v_gid; x_dist = u_dist;
+        } else {
+            x_gid = v_gid; y_gid = u_gid; x_dist = v_dist;
         }
 
+        bool y_local = g.global_to_local.count(y_gid);
+        if (y_local && x_dist + w < g.vertices[g.global_to_local[y_gid]].distance) {
+            int ly = g.global_to_local[y_gid];
+            g.vertices[ly].distance = x_dist + w;
+            g.vertices[ly].parent = g.global_to_local.count(x_gid) ? g.global_to_local[x_gid] : -1;
+            g.vertices[ly].affected = true;
+        }
+
+        if (u_local) {
+            auto& Vu = g.vertices[lu];
+            if (std::none_of(Vu.edges.begin(), Vu.edges.end(), [v_gid](const Edge& e) { return e.dest == v_gid; }))
+                Vu.edges.push_back({v_gid, w});
+        }
         if (v_local) {
-            int lv = g.global_to_local[v_gid];
-            Vertex& Vv = g.vertices[lv];
-
-            if (g.vertex_owner.count(u_gid)) {
-                int lu = u_local ? g.global_to_local[u_gid] : -1;
-                int u_dist = u_local ? g.vertices[lu].distance : INF_DIST;
-
-                if (u_local && Vv.distance > u_dist + w) {
-                    Vv.distance = u_dist + w;
-                    Vv.parent = lu;
-                    Vv.affected = true;
-                }
-
-                bool exists = std::any_of(Vv.edges.begin(), Vv.edges.end(),
-                    [u_gid](const Edge& e) { return e.dest == u_gid; });
-                if (!exists) {
-                    Vv.edges.push_back({u_gid, w});
-                }
-            }
+            auto& Vv = g.vertices[lv];
+            if (std::none_of(Vv.edges.begin(), Vv.edges.end(), [u_gid](const Edge& e) { return e.dest == u_gid; }))
+                Vv.edges.push_back({u_gid, w});
         }
     }
 }
+
 
 
 
