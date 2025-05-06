@@ -22,10 +22,11 @@ struct Vertex {
 
     bool affected = false;    // Needs relaxation in update phase
     bool updated = false;     // Marked by deletion propagation
+    bool affectedDel = false; // Marked by deletion in identify phase
     bool is_boundary = false; // Boundary vertex flag
 };
 
-// Graph partition stored on each MPI rank
+// Graph partition stored on each MPI rank\ n
 struct GraphPartition {
     int num_vertices;
     std::vector<Vertex> vertices;
@@ -48,6 +49,7 @@ struct GraphPartition {
             vertices[i].edges.clear();
             vertices[i].affected = false;
             vertices[i].updated = false;
+            vertices[i].affectedDel = false;
             vertices[i].is_boundary = false;
         }
     }
