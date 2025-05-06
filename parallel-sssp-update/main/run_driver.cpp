@@ -240,7 +240,7 @@ void load_full_graph(const std::string &filename, GraphPartition &g) {
     std::ifstream infile(filename);
     if (!infile) {
         std::cerr << "Failed to open graph file: " << filename << std::endl;
-        exit(1);
+        std::exit(1);
     }
 
     int num_vertices;
@@ -248,21 +248,54 @@ void load_full_graph(const std::string &filename, GraphPartition &g) {
     g.initialize(num_vertices);
     g.local_to_global.resize(num_vertices);
 
-    for (int i = 0; i < num_vertices; ++i) {
-        int id, parent, dist;
-        infile >> id >> parent >> dist;
+    // consume end of first line
+    std::string line;
+    std::getline(infile, line);
 
-        g.vertices[i].id = id;
-        g.vertices[i].parent = parent;
+    // --- Stage 1: read each vertex line and its directed edges ---
+    for (int i = 0; i < num_vertices; ++i) {
+        std::getline(infile, line);
+        if (line.empty()) { --i; continue; }
+
+        std::istringstream iss(line);
+        int id, parent, dist;
+        iss >> id >> parent >> dist;
+
+        g.vertices[i].id       = id;
+        g.vertices[i].parent   = parent;
         g.vertices[i].distance = dist;
-        g.local_to_global[i] = id;
-        g.global_to_local[id] = i;
+        g.local_to_global[i]   = id;
+        g.global_to_local[id]  = i;
 
         int neighbor, weight;
-        while (infile.peek() != '\n' && infile >> neighbor >> weight) {
-            g.vertices[i].edges.push_back({neighbor, weight});
+        while (iss >> neighbor >> weight) {
+            // only what file gives: u → v
+            g.vertices[i].edges.push_back({ neighbor, weight });
         }
-        infile.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    }
+
+    // --- Stage 2: ensure every edge u→v also appears as v→u ---
+    for (int i = 0; i < g.num_vertices; ++i) {
+        int u_gid = g.vertices[i].id;
+        for (const auto &e : g.vertices[i].edges) {
+            int v_gid    = e.dest;
+            int w        = e.weight;
+            auto it_vloc = g.global_to_local.find(v_gid);
+            if (it_vloc == g.global_to_local.end()) continue;  // should not happen
+            int v_loc = it_vloc->second;
+
+            // check if reverse already exists
+            bool found = false;
+            for (const auto &rev : g.vertices[v_loc].edges) {
+                if (rev.dest == u_gid && rev.weight == w) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                g.vertices[v_loc].edges.push_back({ u_gid, w });
+            }
+        }
     }
 }
 
@@ -363,7 +396,7 @@ std::cout << "-----------------------------------------------------\n";
     propagateInfinity(g);
 
             // Dump graph structure for debugging
-std::cout << "------ Initial Graph Structure ------\n";
+std::cout << "------ post propagation Graph Structure ------\n";
 for (const auto &v : g.vertices) {
     std::cout << "Vertex " << v.id << " (dist=" << v.distance << ", parent=" << v.parent << ") -> ";
     for (const auto &e : v.edges) {
